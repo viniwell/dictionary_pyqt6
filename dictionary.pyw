@@ -2,6 +2,7 @@ import sys
 import os
 from PyQt6 import QtCore
 from PyQt6 import QtGui
+from PyQt6.QtCore import QObject
 from PyQt6.QtGui import QCloseEvent, QKeyEvent
 from PyQt6.QtWidgets import *
 from functools import partial
@@ -50,6 +51,9 @@ class Line:
                 layout.addWidget(self.objects[index].printing(), self.objects[index].one_size[0], alignment=QtCore.Qt.AlignmentFlag.AlignRight)
             else:
                 if index in self.window.settings.active_fields:
+                    if index=='Theme':
+                        if isinstance(self.objects[index], LineEdit):
+                            self.objects[index].theme=True
                     layout.addWidget(self.objects[index].printing(), self.objects[index].one_size[0], alignment=QtCore.Qt.AlignmentFlag.AlignLeft)
         for button in self.buttons:
             layout.addWidget(button.printing(), button.one_size[0], alignment=QtCore.Qt.AlignmentFlag.AlignRight)
@@ -132,23 +136,56 @@ class Label(Widget):
 class MyQLineEdit(QLineEdit):
     def __init__(self, text, lineedit):
         super().__init__(text)
-        self.lineedit=lineedit
+        self.parent=lineedit
+        self.textChanged.connect(self.textchange)
+
     def keyReleaseEvent(self, event: QKeyEvent):
         if event.key()==int(QtCore.Qt.Key.Key_S):
             if event.modifiers() & QtCore.Qt.KeyboardModifier.ControlModifier:
-                if self.lineedit.main_window.windows[1].isHidden:
-                    self.lineedit.main_window.show_window(self.lineedit.main_window.windows[1])
+                if self.parent.main_window.windows[1].isHidden:
+                    self.parent.main_window.show_window(self.parent.main_window.windows[1])
         elif event.key()==int(QtCore.Qt.Key.Key_H):
             if event.modifiers() & QtCore.Qt.KeyboardModifier.ControlModifier:
-                self.lineedit.main_window.show_window(self.lineedit.main_window.windows[0])
+                self.parent.main_window.show_window(self.parent.main_window.windows[0])
         else:
             super().keyReleaseEvent(event)
+
+    def textchange(self):
+        if self.parent.theme:
+            pos=self.cursorPosition()
+            if len(self.text())!=0:
+                variants=[theme for theme in self.parent.main_window.settings.themes if self.text().lower() in theme.lower()]
+                try:
+                    variants=variants[:5]
+                except:
+                    pass
+                if variants:
+                    if not self.parent.menu:
+                        self.parent.menu=MenuWindow(self.parent, variants)
+                    else:
+                        self.parent.menu.set_objects(variants)
+                else:
+                    if self.parent.menu:
+                        self.parent.menu.set_objects(variants)
+            self.parent.main_window.activateWindow()
+            #self.editingFinished.connect(partial(self.editingfinished, pos))
+    
+    def editingfinished(self, pos=None):
+        if pos:
+            self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
+            self.setFocus()
+            self.setCursorPosition(pos)
+        """else:
+            super().editingFinished.emit()"""
+            
         
 
 class LineEdit(Widget):
     def __init__(self, width, height, window,text=''):
         self.lineedit=MyQLineEdit(text, self)
         self.lineedit.returnPressed.connect(self.handle_click)
+        self.theme=False
+        self.menu=None
         super().__init__(width, height, window)
 
     def printing(self):
@@ -165,19 +202,14 @@ class LineEdit(Widget):
         return self.printing().text()
     
     def handle_click(self):
-        if self==self.main_window.search_field:
-            self.main_window.search()
-        elif self in self.main_window.objects[ADDING].objects.values():
-            self.main_window.write()
-        else:
-            self.main_window.enter_pressed(self)
+        if self.main_window.windows[0].isHidden() and self.main_window.windows[1].isHidden():
+            if self==self.main_window.search_field:
+                self.main_window.search()
+            elif self in self.main_window.objects[ADDING].objects.values():
+                self.main_window.write()
+            else:
+                self.main_window.enter_pressed(self)
 
-    def action_clicked(self, menu, index):
-        self.lineedit.setText(menu.actions[index].text())
-        menu.printing().setParent(None)
-        del self.menu
-        self.menu=None
-    
 
 class Combobox(Widget):
     def __init__(self, width, height, window,choices, index=0):
@@ -205,39 +237,47 @@ class Checkbox(Widget):
         return self.printing().isChecked()
     
 
-class Menu(Widget):
-    def __init__(self, width, height, window, parent, actions):
-        self.menu = MyQMenu()
+class MenuWindow(QMainWindow):
+    def __init__(self, parent, objects):
+        super().__init__()
+        self.layout=QVBoxLayout()
         self.parent=parent
-        self.set_actions(actions)
+        self.setWindowFlags(QtCore.Qt.WindowType.FramelessWindowHint)
+        self.set_objects(objects)
         self.set_position()
-        super().__init__(width, height, window)
-        """t=QtCore.QThread()
-        t.started.connect(self.menu.exec)
-        t.start()"""
-        self.menu.show()
-        
-
-    def set_actions(self, actions):
-        self.actions=['']*len(actions)
-        for i in range(len(actions)):
-            self.actions[i]=self.menu.addAction(actions[i])
-            self.actions[i].triggered.connect(partial(self.parent.action_clicked, self, i))
+        self.set_size()
+        self.set_central_w()
+        self.show()
 
     def set_position(self):
-        self.printing().move(QtCore.QPoint(self.parent.printing().x(), self.parent.printing().y()))
+        self.move(QtCore.QPoint(self.parent.printing().x(), self.parent.printing().y()+2*self.parent.printing().height()))
 
-    def printing(self):
-        return self.menu
+    def set_size(self):
+        self.setFixedSize(self.parent.printing().width(), len(self.objects)*self.parent.main_window.settings.default_size[1])
     
+    def set_objects(self, objects):
+        if objects:
+            self.layout=QVBoxLayout()
+            self.objects=['']*len(objects)
+            for i in range(len(objects)):
+                self.objects[i]=PushButton(12, 1, self.parent.main_window, objects[i])
+                self.objects[i].printing().clicked.connect(partial(self.action_clicked,i))
+                self.layout.addWidget(self.objects[i].printing())
+        else:
+            self.parent.menu=None
+            self.close()
+            del self
 
-class MyQMenu(QMenu):
-    def __init__(self):
-        super().__init__()
-    
-    def closeEvent(self, event: QCloseEvent):
-        print('close menu')
-        event.ignore()
+    def action_clicked(self, index):
+        self.parent.printing().setText(self.objects[index].printing().text())
+        self.parent.menu=None
+        self.close()
+        del self
+
+    def set_central_w(self):
+        widget=QWidget()
+        widget.setLayout(self.layout)
+        self.setCentralWidget(widget)
 
     
 class HelpWindow(QMainWindow):
@@ -316,8 +356,8 @@ class MainWindow(QMainWindow):
 
     def create_first_line(self, text, index):
         self.search_field=LineEdit(10, 1, self, text)
-        menu=Menu(10, 1, self, self.search_field, ['baldy', 'buddy', 'asshole'])
-        self.search_field.menu=menu
+        """menu=Menu(10, 1, self, self.search_field, ['baldy', 'buddy', 'asshole'])
+        self.search_field.menu=menu"""
 
         self.choose_field=Combobox(3, 1, self, ['All']+[self.settings.fields[self.settings.fields.index(i)] for i in self.settings.active_fields], index)
 
@@ -389,7 +429,7 @@ class MainWindow(QMainWindow):
         for edit in self.objects[ADDING].objects.values():
             if not isinstance(edit, Combobox):
                 count+=edit.check()
-        if count!=(len(self.settings.active_fields)-bool('Theme' in self.settings.active_fields)):
+        if count!=(len(self.settings.active_fields)):
             new_text='$'.join(self.objects[ADDING].objects[key].text() if key in self.settings.active_fields else 'Unrecorded' for key in self.settings.fields)
             if new_text not in self.db:
                 self.db.insert(0, [self.objects[ADDING].objects[key].text() if key in self.settings.active_fields else 'Unrecorded' for key in self.settings.fields])
@@ -436,10 +476,15 @@ class MainWindow(QMainWindow):
             self.update()
     
     def update(self):
-        for i in reversed(range(self.layout.count())):
+        """for i in reversed(range(self.layout.count())):
             for j in reversed(range(self.layout.itemAt(i).count())):
                 self.layout.itemAt(i).itemAt(j).widget().setParent(None)
-            self.layout.itemAt(i).setParent(None)
+            self.layout.itemAt(i).setParent(None)"""
+        for i in reversed(range(self.layout.count())):
+            try:
+                self.layout.takeAt(i).widget().deleteLater()
+            except:
+                pass
         try:
             self.create_first_line(self.search_field.printing().text(), self.choose_field.printing().currentIndex())
         except Exception:
@@ -538,11 +583,10 @@ class MainWindow(QMainWindow):
         if line not in self.objects[CHANGING].keys():
             #self.objects[CHANGING][line]='$'.join(self.objects[SEARCH_RESULTS][self.settings.page][index].objects[i].printing().text() for i in range(5))+"\n"
             self.objects[CHANGING][line]=line.get_list()
+            objects=line.objects
+            line.objects={}
             for field in self.settings.fields:
-                if field!='Theme':
-                    self.objects[LINES][index].objects[field]=LineEdit(12, 1, self, self.objects[LINES][index].objects[field].printing().text())
-                else:
-                    self.objects[LINES][index].objects[field]=Combobox(12, 1, self, self.settings.themes)
+                self.objects[LINES][index].append(field, LineEdit(12, 1, self, objects[field].printing().text()))
         else:
             self.check_line(line)
             new_line=line.get_list()
@@ -564,7 +608,7 @@ class MainWindow(QMainWindow):
     def refresh_adding(self):
         adding_edits=Line([], [], self)
         for i in self.settings.fields:
-            adding_edits.append(i, Combobox(12, 1, self, self.settings.themes) if i=='Theme' else LineEdit(12, 1, self))
+            adding_edits.append(i, LineEdit(12, 1, self))
         adding_edits.append(None, PushButton(1, 1, self,'↺'))
         adding_edits.append(None, PushButton(1, 1, self))
         adding_edits.buttons[-2].button.clicked.connect(self.refresh_adding)
@@ -690,7 +734,7 @@ class SettingsWindow(QMainWindow):
         new_fields=[line[1].text() for line in self.fields_objects[:-1] if isinstance(line[1], Label)]
         self.settings.active_fields=[line[1].text() for line in self.fields_objects[:-1] if line[0].printing().isChecked() and isinstance(line[1], Label)]
         for line in self.main_window.objects[LINES]:
-            line.objects={field:(line.objects[field] if field in line.objects.keys() else ((Label(12, 1, self, 'Unrecorded') if isinstance(line.objects[list(line.objects.keys())[0]], Label) else ((Combobox(12, 1, self, self.settings.themes) if field=='Theme' else LineEdit(12, 1, self, 'Unrecorded')))))) for field in new_fields}
+            line.objects={field:(line.objects[field] if field in line.objects.keys() else ((Label(12, 1, self, 'Unrecorded') if isinstance(line.objects[list(line.objects.keys())[0]], Label) else ((LineEdit(12, 1, self, 'Unrecorded') if field=='Theme' else LineEdit(12, 1, self, 'Unrecorded')))))) for field in new_fields}
         if len(self.main_window.objects[ADDING].objects):
             self.main_window.objects[ADDING].objects={field:(self.main_window.objects[ADDING].objects[field] if field in self.main_window.objects[ADDING].objects.keys() else ((Label(12, 1, self, 'Unrecorded') if isinstance(self.main_window.objects[ADDING].objects[list(self.main_window.objects[ADDING].objects.keys())[0]], Label) else ((Combobox(12, 1, self, self.settings.themes) if field=='Theme' else LineEdit(12, 1, self, 'Unrecorded')))))) for field in new_fields}
         for line in self.main_window.objects[CHANGING].keys():
