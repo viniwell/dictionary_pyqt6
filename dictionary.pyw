@@ -2,7 +2,7 @@ import sys
 import os
 from PyQt6 import QtCore
 from PyQt6 import QtGui
-from PyQt6.QtGui import QCloseEvent, QShowEvent
+from PyQt6.QtGui import QCloseEvent, QKeyEvent
 from PyQt6.QtWidgets import *
 from functools import partial
 import json
@@ -129,10 +129,25 @@ class Label(Widget):
     def text(self):
         return self.printing().text()
     
+class MyQLineEdit(QLineEdit):
+    def __init__(self, text, lineedit):
+        super().__init__(text)
+        self.lineedit=lineedit
+    def keyReleaseEvent(self, event: QKeyEvent):
+        if event.key()==int(QtCore.Qt.Key.Key_S):
+            if event.modifiers() & QtCore.Qt.KeyboardModifier.ControlModifier:
+                if self.lineedit.main_window.windows[1].isHidden:
+                    self.lineedit.main_window.show_window(self.lineedit.main_window.windows[1])
+        elif event.key()==int(QtCore.Qt.Key.Key_H):
+            if event.modifiers() & QtCore.Qt.KeyboardModifier.ControlModifier:
+                self.lineedit.main_window.show_window(self.lineedit.main_window.windows[0])
+        else:
+            super().keyReleaseEvent(event)
+        
 
 class LineEdit(Widget):
     def __init__(self, width, height, window,text=''):
-        self.lineedit=QLineEdit(text)
+        self.lineedit=MyQLineEdit(text, self)
         self.lineedit.returnPressed.connect(self.handle_click)
         super().__init__(width, height, window)
 
@@ -156,6 +171,12 @@ class LineEdit(Widget):
             self.main_window.write()
         else:
             self.main_window.enter_pressed(self)
+
+    def action_clicked(self, menu, index):
+        self.lineedit.setText(menu.actions[index].text())
+        menu.printing().setParent(None)
+        del self.menu
+        self.menu=None
     
 
 class Combobox(Widget):
@@ -175,19 +196,50 @@ class Checkbox(Widget):
     def __init__(self, width, height, window, status=False):
         self.checkbox=QCheckBox()
         self.checkbox.setChecked(status)
-        #self.checkbox.stateChanged.connect(self.print)
         super().__init__(width, height, window)
 
     def printing(self):
         return self.checkbox
 
-    def print(self):
-        print('niggers')
-
     def text(self):
         return self.printing().isChecked()
     
 
+class Menu(Widget):
+    def __init__(self, width, height, window, parent, actions):
+        self.menu = MyQMenu()
+        self.parent=parent
+        self.set_actions(actions)
+        self.set_position()
+        super().__init__(width, height, window)
+        """t=QtCore.QThread()
+        t.started.connect(self.menu.exec)
+        t.start()"""
+        self.menu.show()
+        
+
+    def set_actions(self, actions):
+        self.actions=['']*len(actions)
+        for i in range(len(actions)):
+            self.actions[i]=self.menu.addAction(actions[i])
+            self.actions[i].triggered.connect(partial(self.parent.action_clicked, self, i))
+
+    def set_position(self):
+        self.printing().move(QtCore.QPoint(self.parent.printing().x(), self.parent.printing().y()))
+
+    def printing(self):
+        return self.menu
+    
+
+class MyQMenu(QMenu):
+    def __init__(self):
+        super().__init__()
+    
+    def closeEvent(self, event: QCloseEvent):
+        print('close menu')
+        event.ignore()
+
+    
 class HelpWindow(QMainWindow):
     def __init__(self, main_window):
         super().__init__()
@@ -264,29 +316,24 @@ class MainWindow(QMainWindow):
 
     def create_first_line(self, text, index):
         self.search_field=LineEdit(10, 1, self, text)
-        #self.layout.addWidget(self.search_field.printing(), 0, 0, self.search_field.one_size[1], self.search_field.one_size[0])
+        menu=Menu(10, 1, self, self.search_field, ['baldy', 'buddy', 'asshole'])
+        self.search_field.menu=menu
 
         self.choose_field=Combobox(3, 1, self, ['All']+[self.settings.fields[self.settings.fields.index(i)] for i in self.settings.active_fields], index)
-        #self.layout.addWidget(self.choose_field.printing(), 0, 11, self.choose_field.one_size[1], self.choose_field.one_size[0])
 
         self.search_button=PushButton(1, 1, self, '🔍︎')
-        #self.layout.addWidget(self.search_button.printing(), 0, 14, self.search_button.one_size[1], self.search_button.one_size[0])
         self.search_button.printing().clicked.connect(self.search)
 
         self.add_button=PushButton(1, 1, self, '+')
-        #self.layout.addWidget(self.add_button.printing(), 0, 15, self.add_button.one_size[1], self.add_button.one_size[0])
         self.add_button.printing().clicked.connect(self.add_button_clicked)
 
         self.view_all_button=PushButton(3, 1, self,'View all')
-        #self.layout.addWidget(self.view_all_button.printing(), 0, 16, self.view_all_button.one_size[1], self.view_all_button.one_size[0])
         self.view_all_button.printing().clicked.connect(self.show_all)
 
-        #self.layout.addWidget(self.help_button.printing(), 0, 19, self.help_button.one_size[1], self.help_button.one_size[0])
         self.help_button=PushButton(1, 1, self, '?')
 
         self.settings_button=PushButton(1, 1, self, '⚙️')
         self.windows=[HelpWindow(self), SettingsWindow(self)]
-        #self.layout.addWidget(self.settings_button.printing(), 0, 20, self.settings_button.size[1], self.settings_button.size[0])
 
         self.first_line=[self.search_field, self.search_button, self.choose_field, self.add_button, self.view_all_button, self.help_button, self.settings_button]
 
@@ -297,6 +344,14 @@ class MainWindow(QMainWindow):
     def save_data(self):
         with open('database.json', 'w') as file:
             json.dump([self.db, self.settings.fields, self.settings.active_fields, self.settings.themes,self.settings.app_language], file)
+
+    def keyReleaseEvent(self, event:QtCore.QEvent):
+        if event.key()==int(QtCore.Qt.Key.Key_S):
+            if event.modifiers() & QtCore.Qt.KeyboardModifier.ControlModifier:
+                self.show_window(self.windows[1])
+        elif event.key()==int(QtCore.Qt.Key.Key_H):
+            if event.modifiers() & QtCore.Qt.KeyboardModifier.ControlModifier:
+                self.show_window(self.windows[0])
     
     def check_windows(self):
         self.extra_win-=1
@@ -588,23 +643,10 @@ class SettingsWindow(QMainWindow):
         self.update()
 
     def closeEvent(self, event):
-        if self.check_all_saved():
-            self.hide()
-            self.save()
-            self.main_window.check_windows()
-        else:
-            print('Please, save everything)')
         event.ignore()
-
-    def check_all_saved(self):
-        res=0
-        for line in self.themes_objects[:-1]:
-            if isinstance(line[0], Label):
-                res+=1
-        for line in self.fields_objects[:-1]:
-            if isinstance(line[1], Label):
-                res+=1
-        return res==len(self.fields_objects[:-1]+self.themes_objects[:-1])
+        self.hide()
+        self.save()
+        self.main_window.check_windows()
     
     def update(self):
         try:
