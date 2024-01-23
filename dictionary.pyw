@@ -70,7 +70,8 @@ class Line:
         return [obj.text() for obj in self.objects.values()]
 
 class Settings:
-    def __init__(self) -> None:
+    def __init__(self, main_window) -> None:
+        self.main_window=main_window
         self.one_size=16
         self.page=0
         self.words_per_page=12
@@ -84,9 +85,9 @@ class Settings:
         with open('database.json', 'r') as file:
             data=json.load(file)
 
+        self.main_window.db=data[0]
         self.fields=data[1]
         self.active_fields=[str(num) for num in data[2]]
-        self.themes=data[3]
         self.app_language=data[4]
 
     def set_app_language(self, index):
@@ -94,6 +95,17 @@ class Settings:
         
     def set_themes(self, themes):
         self.themes=themes
+
+    @property
+    def themes(self):
+        themes=[]
+        for line in self.main_window.db:
+            try:
+                themes.append(line[0])
+            except:
+                pass
+        return list(set(themes)) 
+    
 
 class Widget:
     def __init__(self, width, height, window):
@@ -152,9 +164,9 @@ class MyQLineEdit(QLineEdit):
 
     def textchange(self):
         if self.parent.theme:
-            test=self.text()
             if len(self.text())!=0:
-                variants=[theme for theme in self.parent.main_window.settings.themes if self.text().lower() in theme.lower()]
+                t=self.parent.main_window.settings.themes
+                variants=[theme for theme in t if self.text().lower() in theme.lower()]
                 try:
                     variants=variants[:5]
                 except:
@@ -168,9 +180,12 @@ class MyQLineEdit(QLineEdit):
                     if self.parent.menu:
                         self.parent.menu.set_objects(variants)
             else:
-                self.parent.menu.close()
-                del self.parent.menu
-                self.parent.menu=None
+                try:
+                    self.parent.menu.close()
+                    del self.parent.menu
+                    self.parent.menu=None
+                except:
+                    pass
             self.parent.main_window.activateWindow()
     
     def editingfinished(self):
@@ -258,6 +273,7 @@ class MenuWindow(QMainWindow):
             }
             QMainWindow{
                            padding-left: 0px;
+                           border-radius: 45%
             }
         """)
         self.set_size()
@@ -348,9 +364,7 @@ class MainWindow(QMainWindow):
         self.setContentsMargins(1, 1, 1, 1)
         self.layout.setSpacing(2)
 
-        self.settings=Settings()
-        with open('database.json', 'r') as file:
-            self.db=json.load(file)[0]
+        self.settings=Settings(self)
 
         self.extra_win=0
 
@@ -367,14 +381,20 @@ class MainWindow(QMainWindow):
         self.update()
 
     def show_window(self, window):
+        try:
+            for line in self.objects[SEARCH_RESULTS][self.settings.page]:
+                try:
+                    line.objects['Theme'].menu.close()
+                except:
+                    pass
+        except:
+            pass
         self.setEnabled(False)
         self.extra_win+=1
         window.show()
 
     def create_first_line(self, text, index):
         self.search_field=LineEdit(10, 1, self, text)
-        """menu=Menu(10, 1, self, self.search_field, ['baldy', 'buddy', 'asshole'])
-        self.search_field.menu=menu"""
 
         self.choose_field=Combobox(3, 1, self, ['All']+[self.settings.fields[self.settings.fields.index(i)] for i in self.settings.active_fields], index)
 
@@ -736,9 +756,7 @@ class SettingsWindow(QMainWindow):
         # Variables
         self.main_window=main_window
         self.settings=self.main_window.settings
-        self.modes=['App language', 'Themes', 'Fields']
-        self.themes=self.settings.themes
-        self.themes_objects=[]
+        self.modes=['App language', 'Fields']
         self.fields_objects=[]
         self.mainbar_scroll=0
         
@@ -779,7 +797,7 @@ class SettingsWindow(QMainWindow):
 
     def save(self):
         self.main_window.settings.app_language=self.language_choice_combobox.printing().currentText()
-        self.main_window.settings.themes=[line[0].text() for line in self.themes_objects[:-1]]
+        pass #todo update menu window
         for line in self.main_window.objects[LINES]:
                 for obj in line.objects.values():
                     if isinstance(obj, Combobox):
@@ -810,32 +828,10 @@ class SettingsWindow(QMainWindow):
         language_choice_layout.addWidget(self.language_choice_combobox.printing())
         mainbar_layout.addLayout(language_choice_layout)
 
-        themes_overall_layout=QVBoxLayout()
-        self.headers.append(Label(8, 2, self.main_window, self.modes[1]))
-        themes_overall_layout.addWidget(self.headers[1].printing(), alignment=QtCore.Qt.AlignmentFlag.AlignHCenter)
-        themes_scrollarea=QScrollArea()
-        themes_scrollarea.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        themes_scrollarea.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        themes_scrollarea.setWidgetResizable(True)
-        themes_scrollarea.setFixedSize(300,250)
-        themes_layout=QVBoxLayout()
-        self.create_themes_objects()
-        for line in self.themes_objects:
-            line_layout=QHBoxLayout()
-            for object in line:
-                line_layout.addWidget(object.printing(), alignment=QtCore.Qt.AlignmentFlag.AlignRight if isinstance(object, PushButton) else QtCore.Qt.AlignmentFlag.AlignLeft)
-            themes_layout.addLayout(line_layout)
-        themes_groupbox=QGroupBox()
-        themes_groupbox.setLayout(themes_layout)
-        themes_scrollarea.setWidget(themes_groupbox)
-        if themes_scrollarea.verticalScrollBar():
-            themes_scrollarea.verticalScrollBar().setValue(self.themes_objects[-1][0].printing().y())
-        themes_overall_layout.addWidget(themes_scrollarea)
-        mainbar_layout.addLayout(themes_overall_layout)
 
         fields_overall_layout=QVBoxLayout()
-        self.headers.append(Label(8, 2, self.main_window, self.modes[2]))
-        fields_overall_layout.addWidget(self.headers[2].printing(), alignment=QtCore.Qt.AlignmentFlag.AlignHCenter)
+        self.headers.append(Label(8, 2, self.main_window, self.modes[1]))
+        fields_overall_layout.addWidget(self.headers[1].printing(), alignment=QtCore.Qt.AlignmentFlag.AlignHCenter)
         fields_scrollarea=QScrollArea()
         fields_scrollarea.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         fields_scrollarea.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -929,10 +925,12 @@ class SettingsWindow(QMainWindow):
             return [item[1].text() for item in self.fields_objects[:-1]]
         
     def delete_field(self, line):
-        if len(self.fields_objects)>3:
-            index=self.fields_objects.index(line)
-            delete=[self.main_window.db[i].pop(index) for i in range(len(self.main_window.db))]
-            self.fields_objects.remove(line)
+        if len(self.fields_objects)>2:
+            ask=QMessageBox.question(self, str(f'Delete {line[1].printing().text()}'), f'Are you sure about deleting "{line[1].printing().text()}"?', QMessageBox.StandardButton.No | QMessageBox.StandardButton.Yes)
+            if ask==QMessageBox.StandardButton.Yes:
+                index=self.fields_objects.index(line)
+                delete=[self.main_window.db[i].pop(index) for i in range(len(self.main_window.db))]
+                self.fields_objects.remove(line)
             self.update()
         else:
             print('You have a few fields')
@@ -947,60 +945,6 @@ class SettingsWindow(QMainWindow):
             else:
                 print('error')
         self.update()
-
-    def create_themes_objects(self):
-        if not self.themes_objects:
-            for theme in self.themes:
-                line=[Label(6, 1, self.main_window, theme), PushButton(1, 1, self.main_window, '✎'), PushButton(1, 1, self.main_window, '🗑')]
-                line[1].printing().clicked.connect(partial(self.change_theme, line))
-                line[2].printing().clicked.connect(partial(self.delete_theme, line))
-                self.themes_objects.append(line)
-            self.themes_objects.append(self.create_adding_theme_line())
-        else:
-            pass
-    
-    def create_adding_theme_line(self):
-        line=[LineEdit(6, 1, self.main_window), PushButton(1, 1, self.main_window, '+')]
-        line[1].printing().clicked.connect(self.add_theme)
-        return line
-        
-    def change_theme(self, line):
-        index=self.themes_objects.index(line)
-        if isinstance(self.themes_objects[index][0], Label):
-            self.themes_objects[index][0]=LineEdit(6, 1, self.main_window, self.themes_objects[index][0].text())
-        else:
-            if self.themes_objects[index][0].text() and self.themes_objects[index][0].text() not in self.get_themes_list(index):
-                self.themes_objects[index][0]=Label(6, 1, self.main_window, self.themes_objects[index][0].text())
-            else:
-                print('error')
-        self.update()
-
-    def get_themes_list(self, index=-1):
-        if index!=-1:
-            return [item[0].text() for item in self.themes_objects[:-1] if self.themes_objects.index(item)!=index]
-        else:
-            return [item[0].text() for item in self.themes_objects[:-1]]
-
-
-    def delete_theme(self, line):
-        index=self.themes_objects.index(line)
-        if len(self.themes_objects)>2:
-            self.themes_objects.pop(index)
-            self.update()
-        else:
-            print('only one left')
-
-    def add_theme(self):
-        if self.themes_objects[-1][0].text() and self.themes_objects[-1][0].text() not in self.get_themes_list():
-            line=[Label(6, 1, self.main_window, self.themes_objects[-1][0].text()), PushButton(1, 1, self.main_window, '✎'), PushButton(1, 1, self.main_window, '🗑')]
-            line[1].printing().clicked.connect(partial(self.change_theme, line))
-            line[2].printing().clicked.connect(partial(self.delete_theme, line))
-            self.themes_objects.pop(-1)
-            self.themes_objects.append(line)
-            self.themes_objects.append(self.create_adding_theme_line())
-        self.update()
-
-        
 
 
 
