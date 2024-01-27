@@ -3,7 +3,7 @@ import os
 from PyQt6 import QtCore
 from PyQt6 import QtGui
 from PyQt6.QtCore import QObject
-from PyQt6.QtGui import QCloseEvent, QKeyEvent
+from PyQt6.QtGui import QCloseEvent, QContextMenuEvent, QKeyEvent
 from PyQt6.QtWidgets import *
 from functools import partial
 import json
@@ -144,6 +144,15 @@ class Label(Widget):
     
     def text(self):
         return self.printing().text()
+
+    def contextMenuEvent(self, event: QContextMenuEvent):
+        message=QMenu(self.main_window.windows[1])
+        #message.addActions([QtGui.QAction(act) for act in self.messages])
+        message.addAction(self.messages[0])
+        message.actions()[0].triggered.connect(partial(message.setParent, None)) 
+        message.resize(100, 100)
+        message.exec(event)
+    
     
 class MyQLineEdit(QLineEdit):
     def __init__(self, text, lineedit):
@@ -429,6 +438,9 @@ class MainWindow(QMainWindow):
         elif event.key()==int(QtCore.Qt.Key.Key_H):
             if event.modifiers() & QtCore.Qt.KeyboardModifier.ControlModifier:
                 self.show_window(self.windows[0])
+
+    def create_warning_message(self, text):
+        warning = QMessageBox.information(self, 'Watch out!', text, QMessageBox.StandardButton.Ok)
     
     def check_windows(self):
         self.extra_win-=1
@@ -887,7 +899,7 @@ class SettingsWindow(QMainWindow):
                 self.fields_objects[index][0].printing().setChecked(True)
         else:
             if self.get_active_fields_amount()==1:
-                print('You have only 1 field left')
+                self.create_warning_message(line[1], 'You have only 1 field left')
             else:
                 self.fields_objects[index][0].printing().setChecked(False)
         self.update()
@@ -946,9 +958,13 @@ class SettingsWindow(QMainWindow):
                 print('error')
         self.update()
 
+    def create_warning_message(self, parent, text):
+        parent.messages=[text]
+        parent.printing().setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
+        parent.printing().customContextMenuRequested.connect(parent.contextMenuEvent)
+        parent.printing().customContextMenuRequested.emit(QContextMenuEvent(QContextMenuEvent.Reason.Other, parent.printing().pos()).globalPos())
 
-
-                
+        
                 
 app=QApplication(sys.argv)
 app.setWindowIcon(QtGui.QIcon('./images/icon_dict.png'))
