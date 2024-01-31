@@ -119,8 +119,32 @@ class Widget:
 
     def set_size(self):
         self.printing().setFixedSize(self.size[0], self.size[1])
-        
+    
+    def contextMenuEvent(self, event: QContextMenuEvent):
+        try:
+            self.message.close()
+        except:
+            pass
+        self.message = QMenu(self.main_window.windows[1])
+        adding = [self.message.addAction(act) for act in self.messages]
+        connection = [act.triggered.connect(partial(self.delete_action, [act])) for act in self.message.actions()]
+        for act in self.message.actions():
+            timer=QtCore.QTimer(self.message)
+            timer.timeout.connect(partial(self.delete_action, [act]))
+            timer.start(5000) # 5 sec
+        self.message.show()
+        self.message.move(event)
 
+    def delete_action(self, actions):
+        try:
+            [self.messages.remove(action.text()) for action in actions]
+        except:
+            pass
+        self.message.clear()
+        adding=[self.message.addAction(act) for act in self.messages]
+        if self.message.isEmpty():
+            self.message.close()
+        
 
 class PushButton(Widget):
     def __init__(self, width, height, window,text='⊗'):
@@ -144,14 +168,7 @@ class Label(Widget):
     
     def text(self):
         return self.printing().text()
-
-    def contextMenuEvent(self, event: QContextMenuEvent):
-        message=QMenu(self.main_window.windows[1])
-        #message.addActions([QtGui.QAction(act) for act in self.messages])
-        message.addAction(self.messages[0])
-        message.actions()[0].triggered.connect(partial(message.setParent, None)) 
-        message.resize(100, 100)
-        message.exec(event)
+        
     
     
 class MyQLineEdit(QLineEdit):
@@ -917,18 +934,21 @@ class SettingsWindow(QMainWindow):
         return line
     
     def add_field(self):
-        if self.fields_objects[-1][0].text() and self.fields_objects[-1][0].text() not in self.get_fields_list():
-            line=[Checkbox(1, 1, self.main_window), Label(6, 1, self.main_window, self.fields_objects[-1][0].text()), PushButton(1, 1, self.main_window, '✎'), PushButton(1, 1, self.main_window, '🗑')]
-            line[-1].printing().clicked.connect(partial(self.delete_field, line))
-            line[-2].printing().clicked.connect(partial(self.change_field, line))
-            line[0].printing().clicked.connect(partial(self.fields_checkbox_clicked, line))
-            self.fields_objects.pop(-1)
-            self.fields_objects.append(line)
-            self.fields_objects.append(self.create_adding_field_line())
-            self.main_window.db=[line+['Unrecorded'] for line in self.main_window.db.copy()]
-            self.update()
+        if self.fields_objects[-1][0].text():
+            if self.fields_objects[-1][0].text() not in self.get_fields_list():
+                line=[Checkbox(1, 1, self.main_window), Label(6, 1, self.main_window, self.fields_objects[-1][0].text()), PushButton(1, 1, self.main_window, '✎'), PushButton(1, 1, self.main_window, '🗑')]
+                line[-1].printing().clicked.connect(partial(self.delete_field, line))
+                line[-2].printing().clicked.connect(partial(self.change_field, line))
+                line[0].printing().clicked.connect(partial(self.fields_checkbox_clicked, line))
+                self.fields_objects.pop(-1)
+                self.fields_objects.append(line)
+                self.fields_objects.append(self.create_adding_field_line())
+                self.main_window.db=[line+['Unrecorded'] for line in self.main_window.db.copy()]
+                self.update()
+            else:
+                self.create_warning_message(self.fields_objects[-1][0], "This name is already taken")
         else:
-            print('Error')
+            self.create_warning_message(self.fields_objects[-1][0], 'Not able to add empty field')
     
     def get_fields_list(self, index=-1):
         if index!=-1:
@@ -945,25 +965,31 @@ class SettingsWindow(QMainWindow):
                 self.fields_objects.remove(line)
             self.update()
         else:
-            print('You have a few fields')
+            self.create_warning_message(line[-1], 'You have a few fields')
     
     def change_field(self, line):
         index=self.fields_objects.index(line)
         if isinstance(line[1], Label):
             self.fields_objects[index][1]=LineEdit(6, 1, self.main_window, line[1].text())
         else:
-            if line[1].text() and line[1].text() not in self.get_fields_list(index):
-                self.fields_objects[index][1]=Label(6, 1, self.main_window, line[1].text())
+            if line[1].text():
+                if line[1].text() not in self.get_fields_list(index):
+                    self.fields_objects[index][1]=Label(6, 1, self.main_window, line[1].text())
+                else:
+                    self.create_error_message(line[1], 'The new name is already taken')
             else:
-                print('error')
+                self.create_warning_message(line[1], 'Not able to change to empty field')
         self.update()
 
     def create_warning_message(self, parent, text):
-        parent.messages=[text]
+        try:
+            parent.messages.append(text)
+        except:
+            parent.messages=[text]
         parent.printing().setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
         parent.printing().customContextMenuRequested.connect(parent.contextMenuEvent)
         parent.printing().customContextMenuRequested.emit(QContextMenuEvent(QContextMenuEvent.Reason.Other, parent.printing().pos()).globalPos())
-
+        parent.printing().setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.NoContextMenu)
         
                 
 app=QApplication(sys.argv)
