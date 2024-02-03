@@ -29,8 +29,16 @@ LINES='lines'
 def get_layout(list, al):
     layout=QHBoxLayout()
     for obj in list:
-        layout.addWidget(obj.printing(), obj.one_size[0], alignment=al)
+        layout.addWidget(obj.printing(), alignment=al)
     return layout
+
+def widget_by_layout(layout):
+    w=QWidget()
+    w.setLayout(layout)
+    w.setStyleSheet("""
+        margin-top: 1px;
+""")
+    return w
 
 class Line:
     def __init__(self, kargs, args, window):
@@ -122,7 +130,7 @@ class Widget:
     
     def contextMenuEvent(self, event: QContextMenuEvent):
         try:
-            self.message.close()
+            self.message.hide()
         except:
             pass
         self.message = QMenu(self.main_window.windows[1])
@@ -143,7 +151,19 @@ class Widget:
         self.message.clear()
         adding=[self.message.addAction(act) for act in self.messages]
         if self.message.isEmpty():
-            self.message.close()
+            self.message.hide()
+
+    def set_image(self, path):
+        image=QtGui.QImage(path)
+        painter=QtGui.QPainter()
+        rect=self.printing().rect()
+        #painter.drawPixmap(rect, QtGui.QPixmap(image))
+        self.printing().setIcon(QtGui.QIcon(QtGui.QPixmap(image)))
+        """self.printing().setIcon(QtGui.QIcon(path))
+        self.printing().setIconSize(QtCore.QSize(*self.size))
+        self.printing().setContentsMargins(0, 0, 0, 0)
+        QPushButton().ic"""
+
         
 
 class PushButton(Widget):
@@ -381,6 +401,12 @@ class HelpWindow(QMainWindow):
 
 
 class MainWindow(QMainWindow):
+    MENU_ICONS={
+        'Home':'./images/home.png',
+        'Settings':'./images/settings.png',
+        'Help':'/images/help.png',
+        'Exit':'/images/exit.png',
+    }
     def __init__(self):
         super().__init__()
         self.setWindowTitle('Dictionary')
@@ -388,13 +414,14 @@ class MainWindow(QMainWindow):
 
         self.layout=QVBoxLayout()
         self.setContentsMargins(1, 1, 1, 1)
-        self.layout.setSpacing(2)
+        self.layout.setSpacing(1)
 
         self.settings=Settings(self)
 
         self.extra_win=0
 
         self.adding=False
+        self.sb=False
         self.labels=[]
         self.objects={
             LABELS:Line([], [], self),
@@ -404,6 +431,10 @@ class MainWindow(QMainWindow):
             PAGINATION:False,
             LINES:[]
         }
+        self.initUI()
+
+    def initUI(self):
+        self.create_first_line()
         self.update()
 
     def show_window(self, window):
@@ -419,7 +450,9 @@ class MainWindow(QMainWindow):
         self.extra_win+=1
         window.show()
 
-    def create_first_line(self, text, index):
+    def create_first_line(self, text='', index=0, toggled=False):
+        self.create_menu(toggled)
+
         self.search_field=LineEdit(10, 1, self, text)
 
         self.choose_field=Combobox(3, 1, self, ['All']+[self.settings.fields[self.settings.fields.index(i)] for i in self.settings.active_fields], index)
@@ -433,12 +466,60 @@ class MainWindow(QMainWindow):
         self.view_all_button=PushButton(3, 1, self,'View all')
         self.view_all_button.printing().clicked.connect(self.show_all)
 
-        self.help_button=PushButton(1, 1, self, '?')
+        self.first_line=[self.search_field, self.search_button, self.choose_field, self.add_button, self.view_all_button]
 
-        self.settings_button=PushButton(1, 1, self, '⚙️')
-        self.windows=[HelpWindow(self), SettingsWindow(self)]
+    def create_menu(self, toggled):
+        self.menu=QVBoxLayout()
+        self.menu.setContentsMargins(0, 2, 0, 2)
+        self.menu_button=PushButton(2, 1, self, self)
+        self.menu_button.set_image('./images/menu.png')
+        self.menu.addWidget(self.menu_button.printing())
+        self.menu_button.printing().setCheckable(True)
+        self.menu_button.printing().setChecked(toggled)
+        self.menu_button.printing().toggled.connect(self.open_close_menu)
 
-        self.first_line=[self.search_field, self.search_button, self.choose_field, self.add_button, self.view_all_button, self.help_button, self.settings_button]
+        
+        self.menu_icons=QVBoxLayout()
+        for key in MainWindow.MENU_ICONS.keys():
+            button=PushButton(7, 2, self, '')
+            layout=QHBoxLayout()
+            icon=QLabel()
+            icon.setPixmap(QtGui.QPixmap(QtGui.QImage(MainWindow.MENU_ICONS[key])))
+            layout.addWidget(icon, alignment=QtCore.Qt.AlignmentFlag.AlignLeft)
+            text=QLabel(key)
+            layout.addWidget(text, alignment=QtCore.Qt.AlignmentFlag.AlignRight)
+            button.printing().setLayout(layout)
+            button.printing().clicked.connect(partial(self.change_mode, key))
+            self.menu_icons.addWidget(button.printing())
+        gb=QGroupBox()
+        gb.setLayout(self.menu_icons)
+        gb.setContentsMargins(0, 0, 0, 0)
+        self.menu_icons=gb
+        self.menu_icons.setVisible(False)
+        self.menu.addWidget(self.menu_icons, alignment=QtCore.Qt.AlignmentFlag.AlignLeft)
+
+        gb=QGroupBox()
+        gb.setLayout(self.menu)
+        self.menu=gb
+
+        self.menu.setFixedSize(self.menu_button.printing().size())
+
+    def change_mode(self, mode):
+        print(mode)
+
+    def open_close_menu(self):
+        if self.menu_button.printing().isChecked():
+            self.menu_icons.setVisible(True)
+            self.menu_icons.setHidden(False)
+            self.menu_icons.setFixedSize(self.menu_icons.sizeHint())
+            self.menu.setFixedSize(self.menu.sizeHint())
+        else:
+            self.menu_icons.setVisible(False)
+            self.menu_icons.setHidden(True)
+            self.menu_icons.setFixedSize(0, 0)
+            self.menu.setFixedSize(self.menu_button.printing().size())
+        self.update()
+
 
     def closeEvent(self, event):
         self.save_data()
@@ -455,9 +536,6 @@ class MainWindow(QMainWindow):
         elif event.key()==int(QtCore.Qt.Key.Key_H):
             if event.modifiers() & QtCore.Qt.KeyboardModifier.ControlModifier:
                 self.show_window(self.windows[0])
-
-    def create_warning_message(self, text):
-        warning = QMessageBox.information(self, 'Watch out!', text, QMessageBox.StandardButton.Ok)
     
     def check_windows(self):
         self.extra_win-=1
@@ -506,8 +584,6 @@ class MainWindow(QMainWindow):
             if not self.objects[LABELS]:
                 self.createLabels()
             self.refresh_adding()
-            #self.setFixedSize(893, 80)
-            #self.layout.addWidget(label for label in labels, 1, (i-4)*(-3), 1, 3)
         else:
             self.write()
 
@@ -563,21 +639,23 @@ class MainWindow(QMainWindow):
             self.update()
     
     def update(self):
-        """for i in reversed(range(self.layout.count())):
-            for j in reversed(range(self.layout.itemAt(i).count())):
-                self.layout.itemAt(i).itemAt(j).widget().setParent(None)
-            self.layout.itemAt(i).setParent(None)"""
-        for i in reversed(range(self.layout.count())):
-            try:
-                self.layout.takeAt(i).widget().deleteLater()
-            except:
-                pass
-        try:
-            self.create_first_line(self.search_field.printing().text(), self.choose_field.printing().currentIndex())
-        except Exception:
-            self.create_first_line('', 0)
-        self.layout.addLayout(get_layout(self.first_line, QtCore.Qt.AlignmentFlag.AlignRight))
-        self.connect_buttons()
+        del self.layout
+        self.layout=QHBoxLayout()
+
+        self.menu.setStyleSheet("""
+        margin-top: 4px;
+        margin-bottom: 0px;
+        margin-left: 0px;
+        margin-right: 0px;
+        border: 2px;
+""")
+        self.layout.addWidget(self.menu, alignment=QtCore.Qt.AlignmentFlag.AlignTop | QtCore.Qt.AlignmentFlag.AlignLeft)
+
+        main_part=QVBoxLayout()
+        main_part.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+        main_part.addWidget(widget_by_layout(get_layout(self.first_line, QtCore.Qt.AlignmentFlag.AlignRight)), alignment=QtCore.Qt.AlignmentFlag.AlignTop | QtCore.Qt.AlignmentFlag.AlignRight)
+        #self.connect_buttons()
+        
         
         if self.objects[LINES] or self.objects[ADDING].objects:
             self.createLabels()
@@ -586,26 +664,40 @@ class MainWindow(QMainWindow):
 
         self.style_objects()
         if self.objects[LABELS].objects:
-            self.layout.addLayout(self.objects[LABELS].get_layout())
+            main_part.addWidget(widget_by_layout(self.objects[LABELS].get_layout()), alignment=QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignTop)
 
         if self.objects[ADDING].objects:
-            self.layout.addLayout(self.objects[ADDING].get_layout())
+            main_part.addWidget(widget_by_layout(self.objects[ADDING].get_layout()), alignment=QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignTop)
+
         self.create_search_results()
         try:
             for num in range(len(self.objects[SEARCH_RESULTS][self.settings.page])):
-                self.layout.addLayout(self.objects[SEARCH_RESULTS][self.settings.page][num].get_layout())
-        except Exception as e:
-            print(e)
+                main_part.addWidget(widget_by_layout(self.objects[SEARCH_RESULTS][self.settings.page][num].get_layout()), alignment=QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignTop)
+        except:
             pass
+
         pag_layout=self.update_pagination()
         if pag_layout:
-            self.layout.addLayout(pag_layout)
-        self.set_size()
+            main_part.addLayout(pag_layout)
+        main_part.setSpacing(0)
+        main_part.setContentsMargins(1, 0, 1, 0)
 
+        w=QWidget()
+        w.setLayout(main_part)
+        w.setContentsMargins(1, 0, 1, 0)
+        w.setStyleSheet("""
+            margin-top:0px;
+            padding-top:0px;
+""")    
+        self.layout.addWidget(w, alignment=QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignTop)
+        self.setFixedSize(self.menu.width()+w.sizeHint().width()+5, self.menu.height()+5+5 if self.menu.height()>=w.sizeHint().height() else w.sizeHint().height()+10)
+        self.set_cw()
+
+    def set_cw(self):
         widget=QWidget()
         widget.setLayout(self.layout)
         self.setCentralWidget(widget)
-    
+
     def connect_buttons(self):
         self.help_button.printing().clicked.connect(partial(self.show_window, self.windows[0]))
         self.settings_button.printing().clicked.connect(partial(self.show_window, self.windows[1]))
