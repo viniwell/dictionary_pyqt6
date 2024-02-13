@@ -7,6 +7,8 @@ from PyQt6.QtGui import QCloseEvent, QContextMenuEvent, QKeyEvent
 from PyQt6.QtWidgets import *
 from functools import partial
 import json
+import ctypes
+from numba import jit
 
 have_file=False
 
@@ -121,6 +123,7 @@ class Widget:
         self.size=[width*window.settings.one_size, height*window.settings.one_size_vertical]
         self.set_size()
         self.main_window=window
+        #self.printing().setParent(self.main_window)
     
     def printing(self):
         pass
@@ -128,42 +131,32 @@ class Widget:
     def set_size(self):
         self.printing().setFixedSize(self.size[0], self.size[1])
     
-    def contextMenuEvent(self, event: QContextMenuEvent):
+    def contextMenuEvent(self, event: QContextMenuEvent, time=None):
         try:
             self.message.hide()
         except:
             pass
-        self.message = QMenu(self.main_window.windows[1])
+        self.message = QMenu(self.main_window)
         adding = [self.message.addAction(act) for act in self.messages]
-        connection = [act.triggered.connect(partial(self.delete_action, [act])) for act in self.message.actions()]
-        for act in self.message.actions():
+        connection = [act.triggered.connect(partial(self.delete_menu, self.message)) for act in self.message.actions()]
+        if time:
             timer=QtCore.QTimer(self.message)
-            timer.timeout.connect(partial(self.delete_action, [act]))
-            timer.start(5000) # 5 sec
+            timer.timeout.connect(partial(self.delete_menu, self.message))
+            timer.start(time)
         self.message.show()
         self.message.move(event)
+        self.messages=[]
 
-    def delete_action(self, actions):
+    def delete_menu(self, menu):
         try:
-            [self.messages.remove(action.text()) for action in actions]
+            menu.close()
         except:
             pass
-        self.message.clear()
-        adding=[self.message.addAction(act) for act in self.messages]
-        if self.message.isEmpty():
-            self.message.hide()
+        self.messages=[]
 
     def set_image(self, path):
         image=QtGui.QImage(path)
-        painter=QtGui.QPainter()
-        rect=self.printing().rect()
-        #painter.drawPixmap(rect, QtGui.QPixmap(image))
         self.printing().setIcon(QtGui.QIcon(QtGui.QPixmap(image)))
-        """self.printing().setIcon(QtGui.QIcon(path))
-        self.printing().setIconSize(QtCore.QSize(*self.size))
-        self.printing().setContentsMargins(0, 0, 0, 0)
-        QPushButton().ic"""
-
         
 
 class PushButton(Widget):
@@ -188,7 +181,6 @@ class Label(Widget):
     
     def text(self):
         return self.printing().text()
-        
     
     
 class MyQLineEdit(QLineEdit):
@@ -212,27 +204,32 @@ class MyQLineEdit(QLineEdit):
         if self.parent.theme:
             if len(self.text())!=0:
                 t=self.parent.main_window.settings.themes
-                variants=[theme for theme in t if self.text().lower() in theme.lower()]
+                variants=[theme for theme in t if self.text().lower() in theme.lower() and self.text().lower()!=theme.lower()]
                 try:
                     variants=variants[:5]
                 except:
                     pass
-                if variants:
+                """if variants:
                     if not self.parent.menu:
                         self.parent.menu=MenuWindow(self.parent, variants)
                     else:
                         self.parent.menu.set_objects(variants)
                 else:
                     if self.parent.menu:
-                        self.parent.menu.set_objects(variants)
-            else:
-                try:
-                    self.parent.menu.close()
-                    del self.parent.menu
-                    self.parent.menu=None
-                except:
-                    pass
-            self.parent.main_window.activateWindow()
+                        self.parent.menu.set_objects(variants)"""
+                menu=QMenu(self.parent.printing())
+                [menu.addAction(act) for act in variants]
+                [act.triggered.connect(partial(self.setText, act.text())) for act in menu.actions()]
+                #menu.move(QtCore.QPoint(self.parent.printing().x()-7, self.parent.printing().y()+2*self.parent.printing().height()))
+                menu.move(self.parent.printing().rect().bottomLeft())
+                menu.show()
+                app.setActiveWindow(self.parent.main_window)
+                self.parent.main_window.activateWindow()
+                print(self.parent.main_window.isActiveWindow(), menu.isActiveWindow())
+                
+                self.activateWindow()
+                self.setFocus(QtCore.Qt.FocusReason.PopupFocusReason)
+
     
     def editingfinished(self):
         try:
@@ -265,13 +262,12 @@ class LineEdit(Widget):
         return self.printing().text()
     
     def handle_click(self):
-        if self.main_window.windows[0].isHidden() and self.main_window.windows[1].isHidden():
-            if self==self.main_window.search_field:
-                self.main_window.search()
-            elif self in self.main_window.objects[ADDING].objects.values():
-                self.main_window.write()
-            else:
-                self.main_window.enter_pressed(self)
+        if self==self.main_window.search_field:
+            self.main_window.search()
+        elif self in self.main_window.objects[ADDING].objects.values():
+            self.main_window.write()
+        else:
+            self.main_window.enter_pressed(self)
 
 
 class Combobox(Widget):
@@ -359,11 +355,9 @@ class MenuWindow(QMainWindow):
         self.setCentralWidget(widget)
 
     
-class HelpWindow(QMainWindow):
+class HelpWindow:
     def __init__(self, main_window):
-        super().__init__()
         self.main_window=main_window
-        self.setWindowIcon(QtGui.QIcon('./images/icon_dict.png'))
         label=QLabel('Hi!Glad to see you using my app! Here is step-by-step instructions for pleasant work in my app:')
         label.setStyleSheet(
             "float: top;"
@@ -372,33 +366,15 @@ class HelpWindow(QMainWindow):
             )
         label.setWordWrap(True)
         label.setFont(self.get_font(label))
-        self.setContentsMargins(0, 0, 0, 0)
-        self.setCentralWidget(label)
-        self.setWindowTitle('Help window')
-        self.show_hide_anim=QtCore.QPropertyAnimation(self, b'geometry')
-        self.show_hide_anim.setDuration(130)
-        self.show_hide_anim.setEasingCurve(QtCore.QEasingCurve.Type.InBounce)
-        self.show_hide_anim.setStartValue(QtCore.QRect(0, 0, 0, 0))
-        self.show_hide_anim.setEndValue(QtCore.QRect(400, 200, 300, 300))
+
+        self.layout=QVBoxLayout()
+        self.layout.addWidget(label, alignment=QtCore.Qt.AlignmentFlag.AlignTop)
     
     def get_font(self, label):
         font=label.font()
         font.setPointSize(16)
         return font
-
-    def showEvent(self, event) -> None:
-        event.accept()
-        self.show_hide_anim.setDirection(QtCore.QAbstractAnimation.Direction.Forward)
-        self.show_hide_anim.start()
     
-    def closeEvent(self, event):
-        """Called when the user closes the settings window"""
-        event.ignore()
-        self.show_hide_anim.setDirection(QtCore.QAbstractAnimation.Direction.Backward)
-        self.show_hide_anim.start()
-        self.hide()
-        self.main_window.check_windows()
-
 
 class MainWindow(QMainWindow):
     MENU_ICONS={
@@ -418,10 +394,7 @@ class MainWindow(QMainWindow):
 
         self.settings=Settings(self)
 
-        self.extra_win=0
-
         self.adding=False
-        self.sb=False
         self.labels=[]
         self.objects={
             LABELS:Line([], [], self),
@@ -431,24 +404,99 @@ class MainWindow(QMainWindow):
             PAGINATION:False,
             LINES:[]
         }
-        self.initUI()
+        self.init()
+    
+    def home_mode_layout(self):
+        main_part=QVBoxLayout()
 
-    def initUI(self):
-        self.create_first_line()
-        self.update()
+        main_part.addWidget(widget_by_layout(get_layout(self.first_line, QtCore.Qt.AlignmentFlag.AlignRight)), alignment=QtCore.Qt.AlignmentFlag.AlignTop | QtCore.Qt.AlignmentFlag.AlignRight)
+        
+        if self.objects[LINES] or self.objects[ADDING].objects:
+            self.createLabels()
+        else:
+            self.objects[LABELS]=Line([], [], self)
 
-    def show_window(self, window):
+        if self.objects[LABELS].objects:
+            main_part.addWidget(widget_by_layout(self.objects[LABELS].get_layout()), alignment=QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignTop)
+
+        if self.objects[ADDING].objects:
+            main_part.addWidget(widget_by_layout(self.objects[ADDING].get_layout()), alignment=QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignTop)
+
+        self.create_search_results()
         try:
-            for line in self.objects[SEARCH_RESULTS][self.settings.page]:
-                try:
-                    line.objects['Theme'].menu.close()
-                except:
-                    pass
+            for num in range(len(self.objects[SEARCH_RESULTS][self.settings.page])):
+                w=widget_by_layout(self.objects[SEARCH_RESULTS][self.settings.page][num].get_layout())
+                w.mouseDoubleClickEvent=partial(self.change_button_clicked, line=self.objects[SEARCH_RESULTS][self.settings.page][num])
+                w.mouseReleaseEvent=partial(self.line_clicked, line=self.objects[SEARCH_RESULTS][self.settings.page][num])
+                main_part.addWidget(w, alignment=QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignTop)
         except:
             pass
-        self.setEnabled(False)
-        self.extra_win+=1
-        window.show()
+
+        pag_layout=self.update_pagination()
+        if pag_layout:
+            main_part.addLayout(pag_layout)
+        main_part.setSpacing(0)
+        main_part.setContentsMargins(1, 0, 1, 0)
+        
+        return main_part
+    
+    def line_clicked(self, event, line):
+        if event.button()==QtCore.Qt.MouseButton.RightButton:
+            self.createChoiceMenu(event, line)
+
+    def createChoiceMenu(self, event, line):
+        menu=QMenu(self)
+        if line==self.objects[ADDING]:
+            menu.addAction('Add', self.add_button_clicked)
+        if line in self.objects[CHANGING].keys():
+            menu.addAction('Save changes', partial(self.change_button_clicked, line=line))
+        else:
+            menu.addAction('Change', partial(self.change_button_clicked, line=line))
+
+        menu.addAction('Delete', partial(self.delete_line, line))
+        
+        menu.addAction('Close line', partial(self.close_button_clicked, line))
+        menu.exec(event.globalPosition().toPoint())
+
+    def delete_line(self, line):
+        if line.get_list() in self.db:
+            self.db.remove(line.get_list())
+            self.objects[LINES].remove(line)
+        self.update()
+
+
+    def init(self):
+        self.help_window=HelpWindow(self)
+        self.settings_window=SettingsWindow(self)
+
+        self.create_first_line()
+
+        self.sw=QStackedWidget()
+        for layout in [self.home_mode_layout(), self.settings_window.layout, self.help_window.layout]:
+            self.sw.addWidget(widget_by_layout(layout))
+
+        self.layout=QHBoxLayout()
+
+        menu_layout=QVBoxLayout()
+        menu_layout.addWidget(self.menu)
+        gb=QGroupBox()
+        gb.setLayout(menu_layout)
+        gb.setStyleSheet("""border: 0px; margin-left:1px; margin-right: 1px; margin-bottom: 3px;""")
+        self.layout.addWidget(gb, alignment=QtCore.Qt.AlignmentFlag.AlignTop | QtCore.Qt.AlignmentFlag.AlignLeft)
+
+        line=QWidget()
+        line.setStyleSheet("""border-left: 1px solid grey;""")
+        line.setFixedSize(1, self.menu.height()+2 if self.menu.height()>=self.sw.currentWidget().sizeHint().height() else self.sw.currentWidget().sizeHint().height()+2)
+        self.layout.addWidget(line, alignment=QtCore.Qt.AlignmentFlag.AlignLeft)
+
+        self.sw.setFixedSize(self.sw.currentWidget().sizeHint())
+        self.sw.setStyleSheet("""
+            margin-top: 0px;
+""")
+        self.layout.addWidget(self.sw, alignment=QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignTop)
+
+        self.update()
+        self.set_cw()
 
     def create_first_line(self, text='', index=0, toggled=False):
         self.create_menu(toggled)
@@ -477,8 +525,6 @@ class MainWindow(QMainWindow):
         self.menu_button.printing().setCheckable(True)
         self.menu_button.printing().setChecked(toggled)
         self.menu_button.printing().toggled.connect(self.open_close_menu)
-
-        
         self.menu_icons=QVBoxLayout()
         for key in MainWindow.MENU_ICONS.keys():
             button=PushButton(7, 2, self, '')
@@ -489,8 +535,14 @@ class MainWindow(QMainWindow):
             text=QLabel(key)
             layout.addWidget(text, alignment=QtCore.Qt.AlignmentFlag.AlignRight)
             button.printing().setLayout(layout)
-            button.printing().clicked.connect(partial(self.change_mode, key))
+            button.printing().clicked.connect(partial(self.change_mode, key, button))
+            if key=='Home':
+                self.mode=[key, button]
+                button.printing().setObjectName('active_menu_button')
+            else:
+                button.printing().setObjectName('ordinary_menu_button')
             self.menu_icons.addWidget(button.printing())
+
         gb=QGroupBox()
         gb.setLayout(self.menu_icons)
         gb.setContentsMargins(0, 0, 0, 0)
@@ -498,14 +550,35 @@ class MainWindow(QMainWindow):
         self.menu_icons.setVisible(False)
         self.menu.addWidget(self.menu_icons, alignment=QtCore.Qt.AlignmentFlag.AlignLeft)
 
-        gb=QGroupBox()
+        gb=QWidget()
         gb.setLayout(self.menu)
         self.menu=gb
 
         self.menu.setFixedSize(self.menu_button.printing().size())
 
-    def change_mode(self, mode):
-        print(mode)
+    def create_warning_message(self, parent, text, time):
+        try:
+            parent.messages.append(text)
+        except:
+            if isinstance(text, list):
+                parent.messages=text
+            else:
+                parent.messages=[text]
+        parent.contextMenuEvent(parent.printing().mapToGlobal(parent.printing().rect().bottomLeft()), time)
+    
+    def change_mode(self, mode, button):
+        if mode!=self.mode[0]:
+            if self.mode[0]=='Settings':
+                self.settings_window.save()
+            self.mode[0]=mode
+            
+            self.mode[1].printing().setObjectName('ordinary_menu_button')
+
+            self.mode[1]=button
+
+            self.mode[1].printing().setObjectName('active_menu_button')
+
+            self.update()
 
     def open_close_menu(self):
         if self.menu_button.printing().isChecked():
@@ -526,6 +599,7 @@ class MainWindow(QMainWindow):
         sys.exit()
     
     def save_data(self):
+        self.settings_window.save()
         with open('database.json', 'w') as file:
             json.dump([self.db, self.settings.fields, self.settings.active_fields, self.settings.themes,self.settings.app_language], file)
 
@@ -536,18 +610,11 @@ class MainWindow(QMainWindow):
         elif event.key()==int(QtCore.Qt.Key.Key_H):
             if event.modifiers() & QtCore.Qt.KeyboardModifier.ControlModifier:
                 self.show_window(self.windows[0])
-    
-    def check_windows(self):
-        self.extra_win-=1
-        if not self.extra_win:
-            self.setEnabled(True)
-
-        self.update()
 
     def enter_pressed(self, object):
         for line in self.objects[SEARCH_RESULTS][self.settings.page]:
             if object in line.objects.values():
-                self.change_button_clicked(line)
+                self.change_button_clicked(line=line)
 
     def mousePressEvent(self, event):
         try:
@@ -608,7 +675,8 @@ class MainWindow(QMainWindow):
 
     def create_basic_buttons(self, line):
         buttons=[PushButton(1, 1, self, '✎'), PushButton(1, 1, self)]
-        buttons[0].printing().clicked.connect(partial(self.change_button_clicked, line))
+        #buttons=[PushButton(1, 1, self, '✎'), PushButton(1, 1, self)]
+        buttons[0].printing().clicked.connect(partial(self.change_button_clicked, line=line))
         buttons[1].printing().clicked.connect(partial(self.close_button_clicked, line))
         return buttons
 
@@ -639,68 +707,39 @@ class MainWindow(QMainWindow):
             self.update()
     
     def update(self):
-        del self.layout
-        self.layout=QHBoxLayout()
 
-        self.menu.setStyleSheet("""
-        margin-top: 4px;
-        margin-bottom: 0px;
-        margin-left: 0px;
-        margin-right: 0px;
-        border: 2px;
-""")
-        self.layout.addWidget(self.menu, alignment=QtCore.Qt.AlignmentFlag.AlignTop | QtCore.Qt.AlignmentFlag.AlignLeft)
-
-        main_part=QVBoxLayout()
-        main_part.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
-        main_part.addWidget(widget_by_layout(get_layout(self.first_line, QtCore.Qt.AlignmentFlag.AlignRight)), alignment=QtCore.Qt.AlignmentFlag.AlignTop | QtCore.Qt.AlignmentFlag.AlignRight)
-        #self.connect_buttons()
-        
-        
-        if self.objects[LINES] or self.objects[ADDING].objects:
-            self.createLabels()
-        else:
-            self.objects[LABELS]=Line([], [], self)
-
+        self.updateStackedWidget()
+        self.layout.itemAt(1).widget().setFixedSize(1, self.menu.height()+2 if self.menu.height()>=self.sw.currentWidget().sizeHint().height() else self.sw.currentWidget().sizeHint().height()+2)
         self.style_objects()
-        if self.objects[LABELS].objects:
-            main_part.addWidget(widget_by_layout(self.objects[LABELS].get_layout()), alignment=QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignTop)
+        
+        self.setFixedSize(self.menu.width()+self.sw.currentWidget().sizeHint().width()+38, self.menu.height()+17 if self.menu.height()>=self.sw.currentWidget().sizeHint().height() else self.sw.currentWidget().sizeHint().height()+17)
+        
 
-        if self.objects[ADDING].objects:
-            main_part.addWidget(widget_by_layout(self.objects[ADDING].get_layout()), alignment=QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignTop)
+    def updateStackedWidget(self):
+        if self.mode[0]=='Home':
+            self.clearWidgetOfStackedWidget(0, self.home_mode_layout())
+            self.sw.setCurrentIndex(0)
+        elif self.mode[0]=='Settings':
+            self.clearWidgetOfStackedWidget(1, self.settings_window.layout)
+            self.sw.setCurrentIndex(1)
+        elif self.mode[0]=='Help':
+            self.clearWidgetOfStackedWidget(2, self.help_window.layout)
+            self.sw.setCurrentIndex(2)
+        elif self.mode[0]=='Exit':
+            app.closeAllWindows()
+        self.sw.setFixedSize(self.sw.currentWidget().sizeHint())
 
-        self.create_search_results()
-        try:
-            for num in range(len(self.objects[SEARCH_RESULTS][self.settings.page])):
-                main_part.addWidget(widget_by_layout(self.objects[SEARCH_RESULTS][self.settings.page][num].get_layout()), alignment=QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignTop)
-        except:
-            pass
-
-        pag_layout=self.update_pagination()
-        if pag_layout:
-            main_part.addLayout(pag_layout)
-        main_part.setSpacing(0)
-        main_part.setContentsMargins(1, 0, 1, 0)
-
-        w=QWidget()
-        w.setLayout(main_part)
-        w.setContentsMargins(1, 0, 1, 0)
-        w.setStyleSheet("""
-            margin-top:0px;
-            padding-top:0px;
-""")    
-        self.layout.addWidget(w, alignment=QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignTop)
-        self.setFixedSize(self.menu.width()+w.sizeHint().width()+5, self.menu.height()+5+5 if self.menu.height()>=w.sizeHint().height() else w.sizeHint().height()+10)
-        self.set_cw()
+    def clearWidgetOfStackedWidget(self, index, layout):
+        self.sw.setCurrentIndex(index)
+        self.sw.removeWidget(self.sw.currentWidget())
+        sw=QStackedWidget()
+        sw.addWidget(widget_by_layout(layout))
+        self.sw.insertWidget(index, sw)
 
     def set_cw(self):
         widget=QWidget()
         widget.setLayout(self.layout)
         self.setCentralWidget(widget)
-
-    def connect_buttons(self):
-        self.help_button.printing().clicked.connect(partial(self.show_window, self.windows[0]))
-        self.settings_button.printing().clicked.connect(partial(self.show_window, self.windows[1]))
 
     def create_search_results(self):
         self.objects[SEARCH_RESULTS]=[]
@@ -741,13 +780,40 @@ class MainWindow(QMainWindow):
     def style_objects(self):
         for i in self.settings.active_fields:
             if i in self.objects[LABELS].objects.keys():
-                self.objects[LABELS].objects[i].label.setStyleSheet(
-                    "border-style: outset;"
-                    "border-width: 2px;"
-                    "border-color: blue;"
-                    "border-radius: 25%;"
-                    "font-size: 20px;"
+                self.objects[LABELS].objects[i].printing().setStyleSheet(
+                    """border-style: outset;
+                    border-width: 2px;
+                    border-color: blue;
+                    border-radius: 25%;
+                    font-size: 20px;"""
                     )
+        self.menu.setStyleSheet("""
+            padding: 0px;
+            margin-top: 3px;
+            border: 0px;
+        """)
+        self.menu_icons.setStyleSheet("""
+            QPushButton{
+                border-radius: 10px;
+                border: 0px;
+            }
+            #ordinary_menu_button:hover {
+                background-color: #787575;
+            }
+            #ordinary_menu_button{
+                background-color: white;
+            }
+            #active_menu_button{
+                background-color: grey;
+            }
+        """)
+        self.menu_button.printing().setStyleSheet("""
+            border: 1px solid grey;
+            padding: 1px;
+            border-radius: 6px;
+            margin-bottom: 2px;
+""")
+        
         
     def close_button_clicked(self, line):
         if line not in self.objects[LINES]:
@@ -763,7 +829,7 @@ class MainWindow(QMainWindow):
             del line
         self.update()
 
-    def change_button_clicked(self, line):
+    def change_button_clicked(self, event=None, line=None):
         index=self.objects[LINES].index(line)
         if line not in self.objects[CHANGING].keys():
             #self.objects[CHANGING][line]='$'.join(self.objects[SEARCH_RESULTS][self.settings.page][index].objects[i].printing().text() for i in range(5))+"\n"
@@ -784,12 +850,13 @@ class MainWindow(QMainWindow):
             if new_line.count('Unrecorded')==len(self.settings.fields):
                 self.db.remove(self.objects[CHANGING][line])
                 self.objects[LINES].remove(line)
+                del self.objects[CHANGING][line]
                 del line
             else:
                 for field in self.settings.fields:
                     line.objects[field]=Label(12, 1, self, line.objects[field].text())
                 self.db[self.db.index(self.objects[CHANGING][line])]=new_line
-            del self.objects[CHANGING][line]
+                del self.objects[CHANGING][line]
         self.update()
 
     def check_line(self, line):
@@ -867,13 +934,8 @@ class MainWindow(QMainWindow):
         self.update()
 
 
-class SettingsWindow(QMainWindow):
+class SettingsWindow:
     def __init__(self, main_window:MainWindow):
-        super().__init__()
-        self.setWindowTitle('Settings')
-        self.setGeometry(400, 200, 500, 500)
-        self.setFixedSize(500, 500)
-        self.setWindowIcon(QtGui.QIcon('./images/icon_dict.png'))
         # Variables
         self.main_window=main_window
         self.settings=self.main_window.settings
@@ -882,12 +944,6 @@ class SettingsWindow(QMainWindow):
         self.mainbar_scroll=0
         
         self.update()
-
-    def closeEvent(self, event):
-        event.ignore()
-        self.hide()
-        self.save()
-        self.main_window.check_windows()
     
     def update(self):
         try:
@@ -902,9 +958,14 @@ class SettingsWindow(QMainWindow):
         self.main_layout.addLayout(self.sidebar_layout, 1)
         self.main_layout.addWidget(self.mainbar_scrollarea, 6)
 
-        widget=QWidget()
-        widget.setLayout(self.main_layout)
-        self.setCentralWidget(widget)
+        try:
+            self.main_window.update()
+        except:
+            print('Load of settings')
+
+    @property
+    def layout(self):
+        return self.main_layout
     
     def create_sidebar(self):
         self.sidebar_layout=QVBoxLayout()
@@ -1008,7 +1069,7 @@ class SettingsWindow(QMainWindow):
                 self.fields_objects[index][0].printing().setChecked(True)
         else:
             if self.get_active_fields_amount()==1:
-                self.create_warning_message(line[1], 'You have only 1 field left')
+                self.main_window.create_warning_message(line[1], 'You have only 1 field left', 5000)
             else:
                 self.fields_objects[index][0].printing().setChecked(False)
         self.update()
@@ -1038,9 +1099,9 @@ class SettingsWindow(QMainWindow):
                 self.main_window.db=[line+['Unrecorded'] for line in self.main_window.db.copy()]
                 self.update()
             else:
-                self.create_warning_message(self.fields_objects[-1][0], "This name is already taken")
+                self.main_window.create_warning_message(self.fields_objects[-1][0], "This name is already taken", 5000)
         else:
-            self.create_warning_message(self.fields_objects[-1][0], 'Not able to add empty field')
+            self.main_window.create_warning_message(self.fields_objects[-1][0], 'Not able to add empty field', 5000)
     
     def get_fields_list(self, index=-1):
         if index!=-1:
@@ -1057,7 +1118,7 @@ class SettingsWindow(QMainWindow):
                 self.fields_objects.remove(line)
             self.update()
         else:
-            self.create_warning_message(line[-1], 'You have a few fields')
+            self.main_window.create_warning_message(line[-1], 'You have a few fields', 5000)
     
     def change_field(self, line):
         index=self.fields_objects.index(line)
@@ -1068,26 +1129,21 @@ class SettingsWindow(QMainWindow):
                 if line[1].text() not in self.get_fields_list(index):
                     self.fields_objects[index][1]=Label(6, 1, self.main_window, line[1].text())
                 else:
-                    self.create_error_message(line[1], 'The new name is already taken')
+                    self.main_window.create_warning_message(line[1], 'The new name is already taken', 5000)
             else:
-                self.create_warning_message(line[1], 'Not able to change to empty field')
+                self.main_window.create_warning_message(line[1], 'Not able to change to empty field', 5000)
         self.update()
+    
+    
 
-    def create_warning_message(self, parent, text):
-        try:
-            parent.messages.append(text)
-        except:
-            parent.messages=[text]
-        parent.printing().setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
-        parent.printing().customContextMenuRequested.connect(parent.contextMenuEvent)
-        parent.printing().customContextMenuRequested.emit(QContextMenuEvent(QContextMenuEvent.Reason.Other, parent.printing().pos()).globalPos())
-        parent.printing().setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.NoContextMenu)
-        
+      
                 
 app=QApplication(sys.argv)
 app.setWindowIcon(QtGui.QIcon('./images/icon_dict.png'))
+ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(str(app.applicationPid()))
 
 window=MainWindow()
 window.move(0, 0)
 window.show()
-sys.exit(app.exec())
+
+sys.exit(app.exec())   
